@@ -14,14 +14,15 @@ import FileDropzone from "@/components/FileDropzone";
 import SummaryCards from "@/components/SummaryCards";
 import DiffTable from "@/components/DiffTable";
 import PaywallModal, { type PaywallReason } from "@/components/PaywallModal";
+import UpgradeButton from "@/components/UpgradeButton";
 import { analyzeCsvs, parseCsv, type AnalysisResult } from "@/utils/csvAnalyzer";
 import { downloadAuditCsv } from "@/utils/exportAudit";
+import { grantPro, PRO_RETURN_TOKEN, readIsPro } from "@/lib/pro";
 
 /* ------------------------- Free-tier config ------------------------- */
 const FREE_RUN_LIMIT = 3;
 const FREE_ROW_LIMIT = 100;
 const STORAGE_KEY = "csv-guard:runs-used";
-const UPGRADE_URL = "https://your-checkout-link.example.com"; // TODO: your Stripe/Lemon Squeezy link
 const ROW_LIMIT_MESSAGE =
   "Free tier is limited to 100 rows per file. Upgrade to Pro for unlimited rows.";
 
@@ -54,10 +55,29 @@ export default function Home() {
   const [runsUsed, setRunsUsed] = useState<number | null>(null);
   const [paywall, setPaywall] = useState<PaywallReason | null>(null);
 
+  const [isPro, setIsPro] = useState(false);
+  const [proNotice, setProNotice] = useState<"success" | "invalid" | null>(null);
+
   useEffect(() => {
     setRunsUsed(readRunsUsed());
+    setIsPro(readIsPro()); // persisted Pro from a previous session
+
+    // Returning from Lemon Squeezy checkout: /?pro=<token>
+    const token = new URLSearchParams(window.location.search).get("pro");
+    if (token) {
+      if (PRO_RETURN_TOKEN && token === PRO_RETURN_TOKEN) {
+        grantPro();
+        setIsPro(true);
+        setProNotice("success");
+      } else {
+        setProNotice("invalid");
+      }
+      // strip the param so refreshes and shared links don't re-trigger it
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   }, []);
 
+  const hydrated = runsUsed !== null;
   const runsLeft = runsUsed === null ? null : Math.max(0, FREE_RUN_LIMIT - runsUsed);
 
   function clearMessages() {
@@ -71,7 +91,7 @@ export default function Home() {
     // Re-read storage in case another tab used a run
     const used = readRunsUsed();
     setRunsUsed(used);
-    if (used >= FREE_RUN_LIMIT) {
+    if (!isPro && used >= FREE_RUN_LIMIT) {
       setPaywall("runs");
       return;
     }
@@ -82,7 +102,7 @@ export default function Home() {
       const [o, p] = await Promise.all([parseCsv(original), parseCsv(proposed)]);
 
       // Row limit: block the check, and don't consume a run
-      if (o.rows.length > FREE_ROW_LIMIT || p.rows.length > FREE_ROW_LIMIT) {
+      if (!isPro && (o.rows.length > FREE_ROW_LIMIT || p.rows.length > FREE_ROW_LIMIT)) {
         setResult(null);
         setRowAlert(ROW_LIMIT_MESSAGE);
         setPaywall("rows");
@@ -90,9 +110,11 @@ export default function Home() {
       }
 
       setResult(analyzeCsvs(o, p));
-      const next = used + 1;
-      writeRunsUsed(next);
-      setRunsUsed(next);
+      if (!isPro) {
+        const next = used + 1;
+        writeRunsUsed(next);
+        setRunsUsed(next);
+      }
     } catch (e) {
       setResult(null);
       setError(e instanceof Error ? e.message : "Could not parse the CSV files.");
@@ -110,10 +132,22 @@ export default function Home() {
 
   const verdict = result
     ? result.summary.errors > 0
-      ? { tone: "border-red-200 bg-red-50 text-red-800", icon: ShieldAlert, text: `Do not import yet. ${result.summary.errors} critical issue(s) could cause data loss.` }
+      ? {
+          tone: "border-red-200 bg-red-50 text-red-800",
+          icon: ShieldAlert,
+          text: `Do not import yet. ${result.summary.errors} critical issue(s) could cause data loss.`,
+        }
       : result.summary.warnings > 0
-      ? { tone: "border-amber-200 bg-amber-50 text-amber-800", icon: ShieldAlert, text: `No critical errors, but ${result.summary.warnings} warning(s) deserve a look.` }
-      : { tone: "border-emerald-200 bg-emerald-50 text-emerald-800", icon: CheckCircle2, text: "All clear. No data-loss risks detected." }
+      ? {
+          tone: "border-amber-200 bg-amber-50 text-amber-800",
+          icon: ShieldAlert,
+          text: `No critical errors, but ${result.summary.warnings} warning(s) deserve a look.`,
+        }
+      : {
+          tone: "border-emerald-200 bg-emerald-50 text-emerald-800",
+          icon: CheckCircle2,
+          text: "All clear. No data-loss risks detected.",
+        }
     : null;
 
   const badgeTone =
@@ -133,31 +167,68 @@ export default function Home() {
           <div>
             <h1 className="text-2xl font-bold">Shopify CSV Guard</h1>
             <p className="text-sm text-slate-500">
-              Diff your product CSV before importing. Files are processed in your browser and never uploaded.
+              Diff your product CSV before importing. Files are processed in your browser and never
+              uploaded.
             </p>
           </div>
         </div>
 
-        <span
-          className={`rounded-full border px-3 py-1 text-sm font-semibold ${badgeTone}`}
-          aria-live="polite"
-        >
-          Runs left: {runsLeft ?? "–"}/{FREE_RUN_LIMIT}
-        </span>
+        {hydrated &&
+          (isPro ? (
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">
+              Pro
+            </span>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span
+                className={`rounded-full border px-3 py-1 text-sm font-semibold ${badgeTone}`}
+                aria-live="polite"
+              >
+                Runs left: {runsLeft}/{FREE_RUN_LIMIT}
+              </span>
+              <UpgradeButton label="Upgrade" className="!px-3 !py-1" />
+            </div>
+          ))}
       </header>
+
+      {proNotice === "success" && (
+        <p
+          role="status"
+          className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
+        >
+          Thanks for upgrading. Pro is now unlocked on this browser.
+        </p>
+      )}
+      {proNotice === "invalid" && (
+        <p
+          role="alert"
+          className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+        >
+          That upgrade link isn&apos;t valid. If you completed a purchase, contact support with your
+          receipt.
+        </p>
+      )}
 
       <section className="grid gap-6 md:grid-cols-2">
         <FileDropzone
           label="1. Original Shopify export"
           hint="Products export straight from Shopify admin"
           file={original}
-          onFile={(f) => { setOriginal(f); setResult(null); setRowAlert(null); }}
+          onFile={(f) => {
+            setOriginal(f);
+            setResult(null);
+            setRowAlert(null);
+          }}
         />
         <FileDropzone
           label="2. Proposed update CSV"
           hint="The file you plan to import"
           file={proposed}
-          onFile={(f) => { setProposed(f); setResult(null); setRowAlert(null); }}
+          onFile={(f) => {
+            setProposed(f);
+            setResult(null);
+            setRowAlert(null);
+          }}
         />
       </section>
 
@@ -199,12 +270,16 @@ export default function Home() {
       )}
 
       {error && (
-        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>
+        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </p>
       )}
 
       {result && verdict && (
         <section className="mt-8 space-y-6">
-          <div className={`flex items-center gap-3 rounded-xl border p-4 font-medium ${verdict.tone}`}>
+          <div
+            className={`flex items-center gap-3 rounded-xl border p-4 font-medium ${verdict.tone}`}
+          >
             <verdict.icon className="h-5 w-5 shrink-0" />
             {verdict.text}
           </div>
@@ -230,11 +305,10 @@ export default function Home() {
       )}
 
       <PaywallModal
-        reason={paywall}
+        reason={isPro ? null : paywall}
         runLimit={FREE_RUN_LIMIT}
         rowLimit={FREE_ROW_LIMIT}
         onClose={() => setPaywall(null)}
-        onUpgrade={() => window.open(UPGRADE_URL, "_blank", "noopener,noreferrer")}
       />
     </main>
   );
