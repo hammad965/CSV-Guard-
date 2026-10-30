@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { Check, X, Zap } from "lucide-react";
+import UpgradeButton from "./UpgradeButton";
 
 export type PaywallReason = "runs" | "rows";
 
@@ -10,10 +11,9 @@ interface Props {
   runLimit: number;
   rowLimit: number;
   onClose: () => void;
-  onUpgrade: () => void;
 }
 
-export default function PaywallModal({ reason, runLimit, rowLimit, onClose, onUpgrade }: Props) {
+export default function PaywallModal({ reason, runLimit, rowLimit, onClose }: Props) {
   useEffect(() => {
     if (!reason) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -27,7 +27,8 @@ export default function PaywallModal({ reason, runLimit, rowLimit, onClose, onUp
 
   if (!reason) return null;
 
-  const title = reason === "runs" ? "You've used all your free runs" : "This file is over the free limit";
+  const title =
+    reason === "runs" ? "You've used all your free runs" : "This file is over the free limit";
   const body =
     reason === "runs"
       ? `The free tier includes ${runLimit} safety checks. Upgrade to Pro to keep protecting your imports.`
@@ -56,7 +57,9 @@ export default function PaywallModal({ reason, runLimit, rowLimit, onClose, onUp
         <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600">
           <Zap className="h-6 w-6" />
         </div>
-        <h2 id="paywall-title" className="text-xl font-bold text-slate-900">{title}</h2>
+        <h2 id="paywall-title" className="text-xl font-bold text-slate-900">
+          {title}
+        </h2>
         <p className="mt-2 text-sm text-slate-600">{body}</p>
 
         <ul className="mt-4 space-y-2 text-sm text-slate-700">
@@ -68,12 +71,7 @@ export default function PaywallModal({ reason, runLimit, rowLimit, onClose, onUp
         </ul>
 
         <div className="mt-6 flex gap-3">
-          <button
-            onClick={onUpgrade}
-            className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
-          >
-            Upgrade to Pro
-          </button>
+          <UpgradeButton className="flex-1" />
           <button
             onClick={onClose}
             className="rounded-lg px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
